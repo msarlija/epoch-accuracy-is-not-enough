@@ -141,7 +141,7 @@ def main():
     M3 = load(f"{A}/domain_adaptation_da3_perrec.csv", coh)
     src = {"DA-1": (M, C1), "DA-2": (M, C2), "DA-3": (M3, C3)}
 
-    print("\n=== POOLED, leave-one-subject-out (Table 5)")
+    print("\n=== POOLED, leave-one-subject-out (Table 6)")
     pooled = {}
     for lab, (D, c) in src.items():
         g = cond(D, c.format(p="loso")); pooled[lab] = g
@@ -151,7 +151,7 @@ def main():
         print(f"      ROL AE min {fmt(delta(g, 'rol_ae_min'), 2)}  smallest cohort {worst[0]} {worst[1]['d']:+.4f}"
               f"{'' if worst[1]['p'] < 0.05 else ' n.s.'}")
 
-    print("\n=== PER COHORT kappa (Table 6), p<0.05 unless n.s.")
+    print("\n=== PER COHORT kappa (Table 7), p<0.05 unless n.s.")
     for lab, g in pooled.items():
         pk = per_cohort(g)
         print(lab, "  ".join(f"{k}:{v['d']:+.4f}{'' if v['p'] < 0.05 else ' n.s.'}" for k, v in sorted(pk.items())))

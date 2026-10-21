@@ -36,7 +36,8 @@ bash reproduce.sh data       # corpus preparation
 bash reproduce.sh train      # 3 models x 10 folds, then external scoring
 bash reproduce.sh time       # time-input results (Tables 1-4, S1-S7)
 bash reproduce.sh adapt      # adaptation runs (DA-1 to DA-3, DA-O)
-bash reproduce.sh numbers    # adaptation results (Tables 5, 6, S8-S10)
+bash reproduce.sh numbers    # adaptation results (Tables 6, 7, S8-S10)
+bash reproduce.sh yasa       # open-source YASA comparison (Table 5, S11)
 bash reproduce.sh figures    # Figures 2-6
 ```
 

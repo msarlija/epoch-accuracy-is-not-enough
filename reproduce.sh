@@ -2,7 +2,7 @@
 # Every result of the paper, in order. Run from the repository root with the
 # environment of .env.example. Steps are independent once their inputs exist:
 #   bash reproduce.sh            all steps
-#   bash reproduce.sh train      one step (data | train | time | adapt | numbers | figures)
+#   bash reproduce.sh train      one step (data | train | time | adapt | numbers | yasa | figures)
 set -euo pipefail
 cd "$(dirname "$0")"
 PY="uv run --env-file .env python"
@@ -62,12 +62,18 @@ if run adapt; then
   done
 fi
 
-# 5. Every adaptation number of the paper (Tables 5, 6, S8-S10 and the text).
+# 5. Every adaptation number of the paper (Tables 6, 7, S8-S10 and the text).
 if run numbers; then
   $PY scripts/paper_da_numbers.py
 fi
 
-# 6. Figures 2 to 6 (Figure 1 is drawn in the manuscript source).
+# 6. The open-source YASA stager on the same external recordings (Table 5,
+#    Supplementary Table S11). Needs `uv sync --extra yasa` and the OpenMP runtime.
+if run yasa; then
+  $PY scripts/yasa_comparison.py
+fi
+
+# 7. Figures 2 to 6 (Figure 1 is drawn in the manuscript source).
 if run figures; then
   $PY scripts/fig_stage_vs_time.py --wide
   $PY scripts/make_paper_figures.py forest --wide

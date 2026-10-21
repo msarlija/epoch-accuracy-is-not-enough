@@ -26,6 +26,10 @@ dependencies = [
     "openpyxl>=3.1.5",
 ]
 
+[project.optional-dependencies]
+# scripts/yasa_comparison.py only (the open-source reference stager)
+yasa = ["yasa==0.8.0"]
+
 [dependency-groups]
 dev = [
     "ipykernel>=7.3.0",
