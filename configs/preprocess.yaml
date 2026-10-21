@@ -1,0 +1,211 @@
+# Preprocessing configuration — consumed by scripts/prepare_data.py.
+# Changing anything here (especially filter.high_hz) means re-running
+# preprocessing; that is acceptable and intended (§3.3). A planned cutoff
+# comparison at 30 / 25 / 20 Hz is a matter of copies of this file with a
+# different high_hz and data_dir.
+
+defaults: paths.yaml       # data_dir, output_root
+
+target_fs: 100.0          # §3.2 — resample_poly; 250 Hz native -> up 2 / down 5
+epoch_sec: 30.0           # §3.1
+
+# Adult-only inclusion criterion. Paediatric sleep architecture differs enough
+# from adult that children are a different domain rather than a harder case of
+# the same one -- and neither the external cohorts nor the deployment target
+# contains them. Enforced in prepare_data for EVERY cohort, so a future dataset
+# cannot quietly reintroduce them.
+#
+# Recordings with UNKNOWN age are KEPT: DOD-H ships no age at all, and dropping
+# 25 recordings for a missing field is a different decision from excluding
+# children. 61 recordings were removed when this was introduced -- CFS 46,
+# STAGES-MAYO 14, STAGES-BOGN 1.
+min_age: 18
+
+filter:                   # §3.3 — zero-phase IIR on the FULL recording
+  low_hz: 0.2
+  high_hz: 30.0           # preprocessing parameter; 30 leaves margin to Nyquist
+  order: 4
+
+qc:                       # §1 — ported Welch peak criterion; band adjusted to
+  peak_threshold_db: 15.0 # the new filter (old pipeline scanned 2-40 Hz at
+  fmin: 2.0               # fs=125; above 30 Hz is now stop-band)
+  fmax: 30.0
+  fdelta: 2.0
+  # 'any', not 'all': with per-channel flags now honoured by the dataset, a bad
+  # channel costs a CHANNEL and the recording continues at reduced C. Under
+  # 'all' the new amplitude criterion would instead reject all 46 DREAMS
+  # outright for their dead FP2, which is the opposite of the intent.
+  aggregate: any
+  # Reject harmonic COMBS as well as isolated narrowband peaks. The ported peak
+  # criterion compares each bin to a +/-fdelta window, so a comb spaced
+  # <= 2*fdelta hides inside its own local baseline -- which is how the STAGES
+  # BOGN ~1 Hz pulse-train artifact passed QC on 31 of 57 recordings. Clean
+  # cohorts score <= 1.95 (p99 over 13 cohorts); BOGN's median is 5.28.
+  # 0 or null disables the check.
+  comb_max_ratio: 2.5
+  # Per-CHANNEL amplitude sanity. The ported spectral criterion is blind to all
+  # three: a channel reading a flat 0.0 uV has no narrowband peak, so it passes.
+  # 58 QC-passing recordings carry a channel below 1 uV IQR (all 46 DREAMS among
+  # them -- FP2 is dead), 31 have >10% of samples flat, 4 exceed 150 uV.
+  # A failing channel costs a CHANNEL, not a recording: data/dataset.py drops
+  # flagged columns and the recording continues at reduced C, which is safe
+  # because C=1 is already in-distribution (WSC is single-lead; channel dropout
+  # zeroes a channel on 40% of training samples).
+  iqr_min_uv: 1.0
+  iqr_max_uv: 150.0
+  flat_max_frac: 0.10
+  # Record-level rejections that dropping a channel cannot repair: one MAYO night
+  # is scored 100% Wake across all 508 epochs (kappa undefined by construction).
+  min_sleep_frac: 0.10
+  min_stages: 3
+
+# ---------------------------------------------------------------------------
+# Cohorts. ${SLEEP_RAW_ROOT} is the parent of the per-cohort directories
+# and ${SLEEP_REPO} is this repo (both resolved by config.py); see
+# .env.example. Paths below are what is ACTUALLY on disk, which for the
+# S3-synced cohorts (MrOS, SOF) is not the layout NSRR publishes — see the
+# per-cohort notes.
+# Set enabled: false to skip; --cohorts on the CLI overrides.
+# ---------------------------------------------------------------------------
+cohorts:
+  MASS:
+    enabled: true
+    data_path: "${SLEEP_RAW_ROOT}/MASS-2020"
+    import_csv: "${SLEEP_REPO}/data_tables/mass_import.csv"
+    # Subsets SS1/SS2/SS3/SS5 are present (no SS4). The import table's 110 rows
+    # are exactly the Fp-bearing recordings: 50 of the 53 SS1 files carry no Fp
+    # channel at all (F3/F4/C3/C4/O1/O2 only) and are correctly absent from it.
+
+  # MASS SS1 read as a FRONTAL cohort (F3/F4), held out as external. Same reader
+  # and data_path as MASS; rec_prefix keeps its arrays from colliding with the
+  # prefrontal MASS recordings, 3 of which are the same SS1 nights.
+  MASS-SS1:
+    enabled: true
+    data_path: "${SLEEP_RAW_ROOT}/MASS-2020"
+    import_csv: "${SLEEP_REPO}/data_tables/mass_ss1_import.csv"
+    rec_prefix: MASSF
+  CFS:
+    enabled: true
+    import_csv: "${SLEEP_REPO}/data_tables/cfs_import.csv"
+    id_column: nsrrid
+    edf_pattern: "${SLEEP_RAW_ROOT}/CFS/cfs/polysomnography/edfs/cfs-visit5-{id}.edf"
+    ann_pattern: "${SLEEP_RAW_ROOT}/CFS/cfs/polysomnography/annotations-events-nsrr/cfs-visit5-{id}-nsrr.xml"
+    age_column: Age
+    sex_column: Sex
+    limit: 300              # all 730 table rows have an EDF + XML on disk
+
+  HPAP:
+    enabled: true
+    import_csv: "${SLEEP_REPO}/data_tables/homepap_import.csv"
+    id_column: nsrrid
+    edf_pattern: "${SLEEP_RAW_ROOT}/HomePAP/homepap/polysomnography/edfs/lab/full/homepap-lab-full-{id}.edf"
+    ann_pattern: "${SLEEP_RAW_ROOT}/HomePAP/homepap/polysomnography/annotations-events-nsrr/lab/full/homepap-lab-full-{id}-nsrr.xml"
+    age_column: Age
+    sex_column: Sex
+    # all 143 table rows have an EDF + XML on disk (of 191 EDFs downloaded)
+
+  # The local download put EDFs in temp/ with LOWERCASE ids, and the
+  # annotations are the full NSRR export -- not a sibling of the EDFs. 690 of
+  # the 691 EDFs pair with an XML. data_tables/mros_import.csv is generated
+  # from that intersection by scripts/build_nsrr_import_tables.py.
+  MrOS:
+    enabled: true
+    import_csv: "${SLEEP_REPO}/data_tables/mros_import.csv"
+    id_column: nsrrid
+    edf_pattern: "${SLEEP_RAW_ROOT}/MrOS/temp/mros-visit1-{id}.edf"
+    ann_pattern: "${SLEEP_RAW_ROOT}/MrOS/mros/polysomnography/annotations-events-nsrr/visit1/mros-visit1-{id}-nsrr.xml"
+    age_column: nsrr_age
+    sex_column: nsrr_sex
+    limit: 120   # raised from 50; 690 EDF+XML pairs available locally
+
+  # Same story: everything is in temp/, and only 50 of the 270 downloaded EDFs
+  # have an annotation XML anywhere on disk. The generated import table is
+  # exactly those 50, so limit would be a no-op.
+  SOF:
+    enabled: true
+    import_csv: "${SLEEP_REPO}/data_tables/sof_import.csv"
+    id_column: sofid
+    id_format: "05d"          # zero-pad, as the old pipeline's zfill(5)
+    edf_pattern: "${SLEEP_RAW_ROOT}/SOF/temp/sof-visit-8-{id}.edf"
+    ann_pattern: "${SLEEP_RAW_ROOT}/SOF/temp/sof-visit-8-{id}-nsrr.xml"
+    age_column: v8age
+    sex_column: sex
+
+  # participants_csv is vendored into the repo like the other import tables, so
+  # a checkout has everything needed to drive the import. It is BIDS
+  # participants.csv copied verbatim from the dataset (BOM included, for
+  # provenance). Its `pid` column is the PERSON and `participant_id` the
+  # RECORDING: 128 recordings come from 100 people, so subject_id must key on
+  # pid or split_by_subject would leak a person across splits.
+  BOAS:
+    enabled: true
+    data_path: "${SLEEP_RAW_ROOT}/BitBrain"
+    participants_csv: "${SLEEP_REPO}/data_tables/boas_import.csv"
+
+  DREAMS:
+    enabled: true
+    data_path: "${SLEEP_RAW_ROOT}/DREAMS"
+    subjects_csv: "${SLEEP_RAW_ROOT}/DREAMS/DREAMS-subjects-variables.csv"
+    patients_csv: "${SLEEP_RAW_ROOT}/DREAMS/DREAMS-patients-variables.csv"
+
+  # NOTE: this cohort ships its signals as ~1.3 GB CSV per subject
+  # ('time,Fp1,Fp2' at 1000 Hz), not as EDF. data/readers/anphy.py falls back
+  # to <subject>/<subject>_FP.csv when no EDF is present.
+  ANPHY:
+    enabled: true
+    data_path: "${SLEEP_RAW_ROOT}/ANPHY"
+    import_csv: "${SLEEP_RAW_ROOT}/ANPHY/Details information for healthy subjects.csv"
+
+  # --- additions (§3.12) ---
+  YSYW:
+    enabled: true
+    data_path: "${SLEEP_RAW_ROOT}/YSYW/training"
+    records_file: "${SLEEP_RAW_ROOT}/YSYW/training/RECORDS"
+    age_sex_csv: "${SLEEP_REPO}/data_tables/YSYW-age-sex.csv"
+    limit: 300              # of 994 records listed in RECORDS
+
+  # External validation. Streams from S3 one recording at a time into
+  # temp_dir/temp.edf + temp.txt, each overwriting the last, so disk use stays
+  # at one recording. Needs AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY in the
+  # environment (see .env.example); boto3 reads them itself, so no key is ever
+  # written into a config or a log line.
+  #
+  # ~100 recordings, not all 2570: this is an external-validation set, and every
+  # one is a fresh ~90 MB download.
+  #
+  # WSC provides a SINGLE frontal lead, so this cohort is C=1 -- the only one
+  # that exercises that path on real data.
+  #
+  # visits: verified by sampling EDF headers over ranged S3 GETs -- visit 1
+  # carries C3_M2 / O1_M2 and NO frontal lead (0 of 6 sampled), visit 2 is mixed
+  # (3 of 6), visits 3-5 reliably carry F3_M2 (14 of 14). Restricting to 3-5
+  # means the 105 attempts are nearly all usable instead of ~42% wasted
+  # full-file downloads. It does bias toward later visits, i.e. slightly older
+  # subjects -- worth stating when reporting external validation.
+  WSC:
+    enabled: true
+    bucket: wisconsin-sleep-cohort
+    key_prefix: polysomnography
+    temp_dir: "${SLEEP_RAW_ROOT}/WSC/temp"
+    import_csv: "${SLEEP_REPO}/data_tables/wsc-dataset-0.3.0.csv"
+    age_column: age
+    sex_column: sex
+    visits: [3, 4, 5]
+    limit: 120        # 105 gave 91 written (13 unscored, 1 absent); +15 attempts to clear 100
+
+  # Directory is DOD-H (hyphen) with the 25 .h5 files at the top level; there
+  # is no h5/ subdirectory and no scorers/ either, so scorers_dir is omitted
+  # and the reader falls back to the file's own /hypnogram dataset. The
+  # 5-expert majority vote stays unreachable until the scorer JSONs are
+  # fetched separately.
+  DODH:
+    enabled: true
+    data_path: "${SLEEP_RAW_ROOT}/DOD-H"
+    scorer: consensus
+
+  # DOD-O: same h5 layout and reader as DOD-H, different montage (no
+  # prefrontal channels) and an apnea population. C=1 on F3-M2.
+  DODO:
+    enabled: true
+    data_path: "${SLEEP_RAW_ROOT}/DOD-O"
+    scorer: consensus

@@ -1,0 +1,36 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Test / tooling caches
+.pytest_cache/
+
+# Machine-local paths (see .env.example)
+.env
+
+# Preprocessed corpora and run outputs live outside the repo (see
+# configs/paths.yaml); these only appear if SLEEP_DATA_ROOT is unset.
+prepared/
+runs/
+
+# Regenerable diagnostic plots
+figures/
+
+# Manuscript and correspondence -- never commit; this repo is public
+reviewer_comments*
+*reviewer*response*
+*.pdf
+
+# Cohort import tables carry subject-level data (age, sex, clinical variables)
+# from sources under data use agreements that forbid redistribution. The README
+# in that directory documents how to obtain each one. Keep the files locally --
+# configs/preprocess.yaml reads them from here -- but never publish them.
+data_tables/*.csv
+!data_tables/README.md

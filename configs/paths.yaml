@@ -1,0 +1,15 @@
+# The ONLY place the corpus and output locations are written down. Both
+# preprocess.yaml (which writes the corpus) and base.yaml (which reads it)
+# inherit from this file, so the two can no longer drift apart -- training on a
+# corpus that a later preprocessing run replaced is a silent failure.
+#
+# ${SLEEP_DATA_ROOT} comes from the environment; see .env.example.
+#
+# data_dir encodes the preprocessing parameters that produced it. The filter
+# cutoff is a preprocessing parameter (§3.3), so the planned 30/25/20 Hz
+# comparison means a copy of preprocess.yaml with a different high_hz AND a
+# different data_dir -- prepare_data.py resumes on rec_id alone and would
+# otherwise happily reuse arrays filtered differently.
+
+data_dir: ${SLEEP_DATA_ROOT}/prepared/fs100_band0.2-30
+output_root: ${SLEEP_DATA_ROOT}/runs

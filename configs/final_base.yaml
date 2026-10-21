@@ -1,0 +1,144 @@
+# Final model configuration.
+#
+# Corresponds to the run directories final_* (the name they were trained
+# under); the supplementary fine-tuned comparison is supp_finetuned_*, whose
+# runs are e9_tso_*.
+#
+# Self-contained apart from paths.yaml. This replaces an eleven-level
+# `defaults:` chain (paths -> base -> cv_base -> e2_base -> e5_base -> e6_base
+# -> e7_base -> e8_base -> e9_base -> e9_tso_* -> final_*) in which roughly
+# thirty keys were dead overrides and a dozen more restated an ancestor's
+# identical value. `model.head_time_skip` flipped true -> false -> true across
+# that chain and `model.fusion_norm` went post -> eeg_only; each is stated once
+# here. The flattened result was asserted equal, key by key, to the merged
+# result of the old chain before the chain was deleted.
+#
+# The three arms differ ONLY in `model.tso_mode`:
+#   full  time since onset, the proposed model
+#   zero  branch present, input constant -- PARAMETER-MATCHED control
+#         (437,101 params, identical to full), so a difference between the two
+#         is attributable to time INFORMATION, not to capacity or depth
+#   none  branch absent (431,885 params) -- measures what the capacity alone buys
+#
+# Training, in brief. Stage A is epoch-level (T=1); its first 3 epochs train the
+# time branch with the EEG pathway frozen, so attention is not fitted to a
+# randomly initialised backbone. Stage B is sequence-level (T=60, 30 min): a
+# 3-epoch warm-up trains the fresh GRUs and head alone at 1e-3 with the raw time
+# skip CLOSED, then `unfreeze: [tso, fuse]` releases the time branch and fusion
+# at 1e-4 while the CNN and channel aggregation stay frozen for the whole stage.
+# Encoder dropout is 0 throughout Stage B: dropout is a layer, not a parameter,
+# so a frozen backbone would otherwise keep injecting noise it cannot adapt to.
+defaults: paths.yaml
+
+seed: 0
+deterministic: true
+require_qc_pass: true
+cohorts:
+- CFS
+- YSYW
+- HPAP
+- MASS
+- MrOS
+- SOF
+- BOAS
+cohort_caps:
+  MASS: 200
+  CFS: 200
+  HPAP: 200
+  MrOS: 100
+  SOF: 100
+  BOAS: 200
+  DREAMS: 40
+  ANPHY: 40
+  YSYW: 200
+  WSC: 100
+  DODH: 25
+split:
+  val_frac: 0.1
+  test_frac: 0.1
+  n_folds: 10
+c_max: 2
+normalization:
+  mode: fixed
+  scale: 50.0
+  clip: 10.0
+purity:
+  min_label_purity: null
+tso_jitter: 0.025
+augment:
+  channel_dropout_p: 0.4
+  artifact_p: 0.3
+stage_a:
+  enabled: true
+  epochs: 40
+  lr: 0.001
+  batch_size: 256
+  num_workers: 8
+  early_stop_patience: 10
+  plateau_patience: 3
+  plateau_factor: 0.1
+  time_warmup_epochs: 3
+stage_b:
+  enabled: true
+  epochs: 50
+  context_minutes: 30.0
+  train_stride_frac: 0.75
+  warmup_epochs: 3
+  dropout:
+    warmup:
+      cnn: 0.0
+      cnn_spatial: 0.0
+      gru: 0.1
+    finetune:
+      cnn: 0.0
+      cnn_spatial: 0.0
+      gru: 0.01
+  lr_warmup: 0.001
+  lr_after_warmup: 0.0001
+  batch_size: 16
+  num_workers: 8
+  early_stop_patience: 10
+  plateau_patience: 5
+  plateau_factor: 0.1
+  freeze_time_skip: true
+  unfreeze:
+  - tso
+  - fuse
+eval:
+  onset_mode: first_sleep
+  persistent_min: 10.0
+  soremp_thresholds_min:
+  - 10.0
+  - 15.0
+  - 20.0
+  inference_chunk_epochs: 512
+  latency_thresholds_min:
+  - 10.0
+  - 15.0
+  - 20.0
+external_cohorts:
+- WSC
+- ANPHY
+- DODH
+- DREAMS-S
+- DREAMS-P
+- DODO
+- MASS-SS1
+trim_wake:
+  enabled: true
+  min_minutes: 20
+  max_minutes: 40
+model:
+  aggregation: attention
+  embed_dim: 64
+  tso_dim: 32
+  tso_hidden: 16
+  fusion_dim: 128
+  gru_hidden: 64
+  droprate_cnn: 0.3
+  droprate_cnn_spatial: 0.05
+  droprate_gru: 0.1
+  attention_context_dim: 32
+  head_time_skip: true
+  norm: none
+  fusion_norm: eeg_only

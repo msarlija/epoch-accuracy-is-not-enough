@@ -1,0 +1,5 @@
+# Final model, arm: tso_mode=full. See final_base.yaml.
+defaults: final_base.yaml
+name: final_full
+model:
+  tso_mode: full

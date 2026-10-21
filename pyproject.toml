@@ -1,0 +1,55 @@
+[project]
+name = "epoch-accuracy-is-not-enough"
+version = "0.1.0"
+description = "Sleep staging and sleep macrostructure from prefrontal EEG"
+readme = "README.md"
+requires-python = ">=3.12"
+
+# This list is the single source of truth for the environment. Lower bounds are
+# the first release with a cp312 manylinux wheel for each package -- there is no
+# C toolchain in the target environment, so an sdist fallback is fatal rather
+# than slow.
+dependencies = [
+    "torch==2.6.0",       # pinned: cu124 wheels; PyTorch has since moved to cu126/cu128
+    "numpy>=1.26.0",
+    "scipy>=1.11.2",
+    "pandas>=2.1.1",
+    "PyYAML>=6.0.1",
+    "scikit-learn>=1.3.1",
+    "mne>=1.5",           # EDF cohorts: MASS, CFS, HPAP, MrOS, SOF, BOAS, DREAMS, WSC
+    "wfdb>=4.1",          # YSYW
+    "h5py>=3.10.0",       # DOD-H
+    "onnx>=1.16.0",       # tests/test_models.py::test_onnx_exportable + deployment path
+    "matplotlib>=3.8",    # scripts/make_figures.py (mne pulls it in too, but we
+    # use it directly, so it must be declared)
+    "boto3>=1.34",        # WSC streams from S3; see data/readers/s3_stream.py
+    "openpyxl>=3.1.5",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.3.0",
+    "pytest>=7.4",
+]
+
+[tool.uv]
+# The repo is flat-layout (data/, models/, eval/, training/, config.py) and every
+# entrypoint already puts the repo root on sys.path, so there is nothing to
+# install. Declaring this stops uv from building a phantom src/ package.
+package = false
+
+# NOTE: uv 0.12.3 has no `[tool.uv] env-file` setting, so .env is not loaded
+# automatically. Invoke as `uv run --env-file .env python scripts/...`.
+# Forgetting it is safe rather than silent: config.py raises on the unset
+# ${SLEEP_*} variables instead of writing to a literal path.
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu124"
+# REQUIRED. Without it uv's default first-index strategy consults
+# download.pytorch.org before PyPI for *every* package name, and that index
+# serves its own (older) numpy -- silently splitting the resolution.
+explicit = true

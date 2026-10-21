@@ -1,0 +1,5 @@
+# Final model, arm: tso_mode=zero. See final_base.yaml.
+defaults: final_base.yaml
+name: final_zero
+model:
+  tso_mode: zero
