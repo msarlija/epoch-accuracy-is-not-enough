@@ -12,6 +12,9 @@ run() { [ "$STEP" = all ] || [ "$STEP" = "$1" ]; }
 # 1. Corpus: raw recordings -> filtered 100 Hz arrays, labels and manifest.
 #    Needs the cohort import tables described in data_tables/README.md.
 if run data; then
+  # ANPHY is released against a central system reference: rebuild Fp1-TP10 and
+  # Fp2-TP9 at 250 Hz from the OSF archive first (streams ~85 GB, keeps ~0.5 GB)
+  $PY scripts/reextract_anphy.py
   $PY scripts/prepare_data.py --config configs/preprocess.yaml
   $PY scripts/check_prepared.py --config configs/preprocess.yaml
 fi

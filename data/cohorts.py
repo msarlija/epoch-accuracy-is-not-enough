@@ -146,11 +146,15 @@ COHORTS = {
     "ANPHY": CohortSpec(
         name="ANPHY",
         montage_family="prefrontal",
-        channels=ChannelSpec(names=("Fp1", "Fp2"), polarity=(1, 1)),
-        fallbacks=[ChannelSpec(names=("Fp1-Ref", "Fp2-Ref"), polarity=(1, 1))],
+        # The released EEG is referenced to the amplifier's central system
+        # reference. reextract_anphy.py re-references to the contralateral
+        # mastoid side and writes <subject>_Fp-TP_250Hz.edf with exactly these
+        # two labels, so there is no fallback: an unconverted folder must fail.
+        channels=ChannelSpec(names=("Fp1-TP10", "Fp2-TP9"), polarity=(1, 1)),
         native_epoch_sec=30.0,
         reader="anphy",
-        notes="Annotations txt: '<stage> <start_sec> ...' lines; 'L' = unknown.",
+        notes="Annotations txt: '<stage> <start_sec> ...' lines; 'L' = unknown. "
+              "Signals: Fp1-TP10 and Fp2-TP9 at 250 Hz from reextract_anphy.py.",
     ),
     # ------------------------------------------------------------------
     # Additions
