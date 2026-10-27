@@ -8,11 +8,14 @@ columns 'Subjects ID', 'Age', 'Sex'.
 
 Signals come in one of two forms and this reader accepts both:
 
-* an EDF, read via the shared mne path like every other EDF cohort;
-* ``<subject>_FP.csv`` — 'time,Fp1,Fp2' at 1000 Hz, ~1.3 GB per subject. The
-  old pipeline round-tripped the EDF through CSV to save disk, and for this
-  archive the CSV is what was kept: there is no EDF to go back to. Preferring
-  the EDF when present keeps the two paths from diverging silently.
+* an EDF, read via the shared mne path like every other EDF cohort. This is
+  ``<subject>_Fp-TP_250Hz.edf`` written by ``reextract_anphy.py``: the released
+  EEG is referenced to the amplifier's central system reference, so the script
+  re-references to Fp1-TP10 and Fp2-TP9 and resamples 1000 -> 250 Hz;
+* ``<subject>_FP.csv`` — 'time,Fp1,Fp2' at 1000 Hz with the original central
+  reference, from an older pipeline. The cohort spec no longer names these
+  channels, so a folder holding only the CSV is skipped rather than silently
+  prepared with the wrong reference. The EDF is preferred when present.
 """
 
 import os

@@ -45,6 +45,10 @@ def _run_batches(model, loader, criterion, optimizer, device,
     model.train() if train else model.eval()
     total_loss, total_correct, total_count = 0.0, 0, 0
     ctx = torch.enable_grad() if train else torch.no_grad()
+    #: stateful Stage B: one forward-GRU state per stream, carried across the
+    #: consecutive windows of a recording and zeroed where a new one starts.
+    #: Detached after every step (truncated backpropagation through time).
+    states: Dict[str, torch.Tensor] = {}
     with ctx:
         for batch in loader:
             x = batch["x"].to(device, non_blocking=True)
@@ -52,7 +56,26 @@ def _run_batches(model, loader, criterion, optimizer, device,
             mask = batch["channel_mask"].to(device, non_blocking=True)
             y = batch["y"].to(device, non_blocking=True)
 
-            out = model(x, tso, channel_mask=mask)
+            if "stream" in batch:
+                sid = batch["stream"].to(device).long()
+                keep = (~batch["reset"].to(device).bool()).float()[:, None]
+                need = int(sid.max()) + 1
+                prev = {}
+                for k in ("g1", "g2"):
+                    if k in states and states[k].shape[0] >= need:
+                        prev[k] = states[k][sid] * keep
+                out = model(x, tso, channel_mask=mask, seq_state=prev or None,
+                            return_state=True)
+                for k, v in out["seq_state"].items():
+                    if k not in states or states[k].shape[0] < need:
+                        grown = v.new_zeros(max(need, 64), v.shape[1])
+                        if k in states:
+                            grown[:states[k].shape[0]] = states[k]
+                        states[k] = grown
+                    states[k] = states[k].clone()
+                    states[k][sid] = v.detach()
+            else:
+                out = model(x, tso, channel_mask=mask)
             logits = out["logits"]                       # (B, T, K)
             loss = criterion(logits.reshape(-1, logits.shape[-1]),
                              y.reshape(-1))

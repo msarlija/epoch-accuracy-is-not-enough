@@ -20,6 +20,16 @@
 #         is attributable to time INFORMATION, not to capacity or depth
 #   none  branch absent (431,885 params) -- measures what the capacity alone buys
 #
+# Stage B is STATEFUL (`stage_b.stateful`): each of the `batch_size` streams walks
+# one recording in consecutive, non-overlapping 60-epoch windows from a random
+# offset, the forward GRU states are carried from window to window (detached)
+# and reset at a new recording, validation runs the same way, and inference
+# scores each recording in one pass (`eval.inference_chunk_epochs: 0`).
+#
+# Orientation: every derivation is read with the (pre)frontal electrode
+# referenced to the mastoid, through the manifest's `sign` column written by
+# scripts/set_orientation.py (Section 2.2, Supplementary Section 1).
+#
 # Training, in brief. Stage A is epoch-level (T=1); its first 3 epochs train the
 # time branch with the EEG pathway frozen, so attention is not fitted to a
 # randomly initialised backbone. Stage B is sequence-level (T=60, 30 min): a
@@ -104,6 +114,7 @@ stage_b:
   unfreeze:
   - tso
   - fuse
+  stateful: true
 eval:
   onset_mode: first_sleep
   persistent_min: 10.0
@@ -111,7 +122,7 @@ eval:
   - 10.0
   - 15.0
   - 20.0
-  inference_chunk_epochs: 512
+  inference_chunk_epochs: 0      # whole recording in one pass
   latency_thresholds_min:
   - 10.0
   - 15.0

@@ -360,6 +360,15 @@ def score(head, X, device):
         return torch.softmax(lg, 1).cpu().numpy()
 
 
+def dump_proba(recs, out_dir):
+    """per-epoch probabilities of every recording, for ensembles over folds"""
+    os.makedirs(out_dir, exist_ok=True)
+    for r in recs:
+        np.savez_compressed(os.path.join(out_dir, f"{r['rec_id']}.npz"),
+                            proba=r["proba"].astype(np.float32),
+                            y_true=np.asarray(r["y_true"], np.int8))
+
+
 def make_record(row, y_true, proba):
     pred = proba.argmax(1)
     return {"rec_id": row["rec_id"], "cohort": row["cohort"],
@@ -464,6 +473,8 @@ def main() -> int:
                     help="recompute teacher pseudo-labels every N steps")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--tag", default="sweep")
+    ap.add_argument("--dump-proba", action="store_true",
+                    help="write per-epoch prior-corrected probabilities (and the baseline's) for ensembles over folds")
     ap.add_argument("--out-root", default=os.path.expanduser(os.environ.get("SLEEP_DATA_ROOT", "~/data/sleep_staging") + "/analysis/da4"))
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
@@ -589,6 +600,8 @@ def main() -> int:
                              score(head0, tgt[r][0], device))
                  for r in tgt_df.rec_id]
     B = write_metrics(base_recs, os.path.join(out_dir, "baseline"), eval_cfg)
+    if args.dump_proba:
+        dump_proba(base_recs, os.path.join(out_dir, "baseline", "proba"))
     B["rec_id"] = B["rec_id"].astype(str)
     base_by_id = {r["rec_id"]: r for r in base_recs}
 
@@ -629,8 +642,10 @@ def main() -> int:
             base_ordered = [base_by_id[r] for r in tgt_df.rec_id]
             safe = label.replace("/", "_")
             A_raw = write_metrics(ordered, os.path.join(out_dir, safe), eval_cfg)
-            A_pc = write_metrics(prior_correct(ordered, base_ordered),
-                                 os.path.join(out_dir, safe + "_prior"), eval_cfg)
+            pc_recs = prior_correct(ordered, base_ordered)
+            A_pc = write_metrics(pc_recs, os.path.join(out_dir, safe + "_prior"), eval_cfg)
+            if args.dump_proba:
+                dump_proba(pc_recs, os.path.join(out_dir, safe + "_prior", "proba"))
             for A, suffix in ((A_raw, ""), (A_pc, "+prior")):
                 A["rec_id"] = A["rec_id"].astype(str)
                 row = summarise(A, B, label + suffix)

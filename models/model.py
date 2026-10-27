@@ -101,11 +101,17 @@ class SleepStager(nn.Module):
     def forward(self, x: torch.Tensor, tso: torch.Tensor,
                 channel_mask: Optional[torch.Tensor] = None,
                 return_alpha: bool = False,
-                return_features: bool = False) -> Dict[str, torch.Tensor]:
+                return_features: bool = False,
+                seq_state: Optional[dict] = None,
+                return_state: bool = False) -> Dict[str, torch.Tensor]:
         """
         x:            (B, T, C, S) normalized EEG epochs
         tso:          (B, T) normalized time-since-onset
         channel_mask: (B, T, C) bool, False = absent/dropped channel
+        seq_state:    forward GRU states from the previous window of the same
+                      recordings (stateful Stage B); None = start from zero
+        return_state: also return the final forward GRU states as
+                      ``out['seq_state']``
         Returns {'logits': (B, T, n_classes)[, 'alpha': (B, T, C)]}.
         """
         B, T, C, S = x.shape
@@ -119,8 +125,12 @@ class SleepStager(nn.Module):
         fused_in = agg if t_emb is None else torch.cat([agg, t_emb], dim=-1)
         h = self.fuse(fused_in)                     # (B, T, fusion_dim)
 
+        new_state = None
         if self.with_sequence:
-            g1, g2 = self.seq(h)
+            if seq_state is not None or return_state:
+                g1, g2, new_state = self.seq(h, state=seq_state, return_state=True)
+            else:
+                g1, g2 = self.seq(h)
             parts = [g1, g2, h]
             if self.head_time_skip:
                 t_raw = self.tso.raw_features(tso)
@@ -139,6 +149,8 @@ class SleepStager(nn.Module):
                                   else (head_out, None, None))
 
         out = {"logits": logits}
+        if return_state and new_state is not None:
+            out["seq_state"] = new_state
         if return_alpha and alpha is not None:
             out["alpha"] = alpha
         if return_features:

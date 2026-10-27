@@ -27,8 +27,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# scripts/yasa_comparison.py only (the open-source reference stager)
-yasa = ["yasa==0.8.0"]
+# scripts/gssc_score.py and gssc_param_count.py only (the open-source reference stager)
+gssc = ["gssc==0.0.9", "mne>=1.6"]
 
 [dependency-groups]
 dev = [
