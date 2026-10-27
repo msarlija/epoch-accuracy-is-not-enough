@@ -62,6 +62,11 @@ class AugmentConfig:
     #: sub-window length as a fraction of the clip, U(min, max)
     artifact_frac: Tuple[float, float] = (0.05, 0.5)
     line_noise_hz: Sequence[float] = (50.0, 60.0)
+    #: Probability of inverting the sign of ALL channels of a sample together
+    #: (polarity-invariance augmentation; 0 = off). The stateful Stage B draws it
+    #: once per recording and training pass, so a stream never mixes
+    #: orientations within a recording; elsewhere it is drawn per sample.
+    sign_flip_p: float = 0.0
 
 
 def _inject_artifact(x: np.ndarray, ch: int, fs: float, kind: str,
@@ -119,6 +124,11 @@ class RecordEntry:
     #: whose QC flagged a channel keeps only the good ones, so ``n_channels``
     #: is the surviving count and this says where they live on disk.
     channel_index: Optional[List[int]] = None
+    #: Orientation correction applied when the arrays are read: -1 for cohorts
+    #: whose stored arrays are sign-inverted (manifest column ``sign``; see
+    #: scripts/set_orientation.py). Applied AFTER normalisation, which is
+    #: then exactly the normalised signal of the sign-corrected recording.
+    sign: float = 1.0
 
 
 def entries_from_manifest(manifest_df,
@@ -167,8 +177,19 @@ def entries_from_manifest(manifest_df,
             cohort=str(row.get("cohort", "")),
             montage_family=str(row.get("montage_family", "")),
             channel_index=keep if keep != list(range(n_stored)) else None,
+            sign=_row_sign(row),
         ))
     return entries
+
+
+def _row_sign(row) -> float:
+    """The manifest's ``sign`` column (+1 when absent or empty)."""
+    v = row.get("sign", 1.0) if hasattr(row, "get") else 1.0
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return 1.0
+    return -1.0 if v < 0 else 1.0
 
 
 SLEEP_STAGES = (1, 2, 3, 4)
@@ -309,6 +330,12 @@ class SleepSequenceDataset(Dataset):
     # -- main ---------------------------------------------------------------
     def __getitem__(self, i: int) -> dict:
         ri, start = self.index[i]
+        return self._item(ri, start, i)
+
+    def _item(self, ri: int, start: int, i: int, flip: Optional[bool] = None) -> dict:
+        """Window of recording ``ri`` starting at epoch ``start``; ``i`` seeds
+        the augmentation draws. ``flip`` forces the sign-inversion decision
+        (stateful Stage B); None draws it per sample when augmenting."""
         entry = self.entries[ri]
         arrays = self._arrays(entry.rec_id)
         T, S, C = self.seq_len, self.epoch_samples, entry.n_channels
@@ -321,6 +348,8 @@ class SleepSequenceDataset(Dataset):
             seg = seg[:, entry.channel_index]
         seg = apply_normalization(seg, self.normalization, entry.stats,
                                   self.normalization_cfg).astype(np.float32)
+        if entry.sign != 1.0:
+            seg *= np.float32(entry.sign)
 
         y = arrays["y"][start:start + T].astype(np.int64)
         purity = arrays["purity"][start:start + T].astype(np.float32)
@@ -353,6 +382,10 @@ class SleepSequenceDataset(Dataset):
         # augmentations operate on (n_samples, C) before epoch folding
         if self.augment is not None:
             aug = self.augment
+            if flip is None:
+                flip = aug.sign_flip_p > 0 and rng.uniform() < aug.sign_flip_p
+            if flip:
+                seg *= np.float32(-1.0)
             dropped = False
             if C >= 2 and rng.uniform() < aug.channel_dropout_p:
                 drop = int(rng.integers(0, C))
@@ -411,4 +444,114 @@ def make_loader(dataset: SleepSequenceDataset, batch_size: int,
         dataset, batch_size=batch_size, shuffle=shuffle,
         num_workers=num_workers, pin_memory=pin_memory,
         drop_last=shuffle,  # ragged final batch only matters for training
+        persistent_workers=num_workers > 0)
+
+
+# --------------------------------------------------------------------------
+# Stateful Stage B: consecutive windows of the same recording, in order, with
+# the GRU state carried across them by the training loop.
+# --------------------------------------------------------------------------
+class StatefulSequenceDataset(SleepSequenceDataset):
+    """Windows addressed by key ``(ri, start, seed, stream, reset)`` instead of
+    a flat index, so a batch sampler can hand out, for each of B parallel
+    streams, the next consecutive window of the recording that stream is
+    walking through. ``stream`` and ``reset`` are passed through to the batch:
+    the loop keeps one GRU state per stream and zeroes it where ``reset``.
+
+    Build with ``stride=seq_len``; the index itself is not used for sampling.
+    """
+
+    def __getitem__(self, key) -> dict:
+        ri, start, seed, stream, reset = key[:5]
+        flip = bool(key[5]) if len(key) > 5 else None
+        out = self._item(int(ri), int(start), int(seed), flip=flip)
+        out["stream"] = int(stream)
+        out["reset"] = bool(reset)
+        return out
+
+
+class StatefulBatchSampler:
+    """Yields batches of keys for :class:`StatefulSequenceDataset`.
+
+    Every pass assigns the recordings to ``n_streams`` streams so that the
+    streams' total lengths stay balanced (longest first, each to the currently
+    shortest stream), and walks each stream window by window: batch k holds the
+    k-th window of every stream that still has one, so streams that run out
+    simply leave the later batches. Windows are consecutive and non-
+    overlapping, ``seq_len`` epochs each; the first window of every recording
+    carries ``reset=True``.
+
+    ``train=True`` shuffles the recordings and draws a random start offset in
+    [0, seq_len) per recording and pass, so window boundaries move from pass to
+    pass (the role ``train_stride_frac`` plays for the shuffled loader).
+    ``train=False`` is deterministic: offset 0, fixed order.
+    """
+
+    def __init__(self, dataset: SleepSequenceDataset, n_streams: int,
+                 train: bool, seed: int = 0):
+        self.ds = dataset
+        self.n_streams = int(n_streams)
+        self.train = bool(train)
+        self.seed = int(seed)
+        self._pass = 0
+
+    def _windows(self, ri: int, rng) -> List[int]:
+        lo, hi = self.ds.bounds[ri]
+        T = self.ds.seq_len
+        off = int(rng.integers(0, T)) if (self.train and hi - lo + 1 >= 2 * T) else 0
+        return list(range(lo + off, hi - T + 2, T))
+
+    def _plan(self):
+        rng = np.random.default_rng([self.seed, self._pass])
+        order = np.arange(len(self.ds.entries))
+        if self.train:
+            rng.shuffle(order)
+        wins = {int(ri): self._windows(int(ri), rng) for ri in order}
+        streams = [[] for _ in range(self.n_streams)]
+        load = np.zeros(self.n_streams)
+        # longest first onto the currently shortest stream; ties broken at
+        # random when training so the stream composition changes every pass
+        tie = {int(r): (rng.random() if self.train else 0.0) for r in order}
+        for ri in sorted(order, key=lambda r: (-len(wins[int(r)]), tie[int(r)])):
+            w = wins[int(ri)]
+            if not w:
+                continue
+            b = int(np.argmin(load))
+            streams[b].append(int(ri))
+            load[b] += len(w)
+        # sign inversion: one draw per recording and pass, so the carried GRU
+        # state never sees a recording change orientation mid-stream
+        aug = getattr(self.ds, 'augment', None)
+        p_flip = float(getattr(aug, 'sign_flip_p', 0.0)) if (self.train and aug is not None) else 0.0
+        seqs = []
+        for b, recs in enumerate(streams):
+            seq = []
+            for ri in recs:
+                flip = bool(p_flip > 0 and rng.uniform() < p_flip)
+                for j, start in enumerate(wins[ri]):
+                    seed = int(rng.integers(0, 2 ** 62)) if self.train else (ri * 100_003 + start)
+                    seq.append((ri, start, seed, b, j == 0, flip))
+            seqs.append(seq)
+        return seqs
+
+    def __iter__(self):
+        seqs = self._plan()
+        self._pass += 1
+        for k in range(max((len(s) for s in seqs), default=0)):
+            batch = [s[k] for s in seqs if k < len(s)]
+            if batch:
+                yield batch
+
+    def __len__(self) -> int:
+        T = self.ds.seq_len
+        tot = sum(max(0, (hi - lo + 1) // T) for lo, hi in self.ds.bounds)
+        return int(np.ceil(tot / max(self.n_streams, 1)))
+
+
+def make_stateful_loader(dataset: StatefulSequenceDataset, n_streams: int,
+                         train: bool, num_workers: int = 8, seed: int = 0,
+                         pin_memory: bool = True) -> torch.utils.data.DataLoader:
+    return torch.utils.data.DataLoader(
+        dataset, batch_sampler=StatefulBatchSampler(dataset, n_streams, train, seed),
+        num_workers=num_workers, pin_memory=pin_memory,
         persistent_workers=num_workers > 0)

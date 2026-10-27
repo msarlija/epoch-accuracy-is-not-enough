@@ -146,6 +146,8 @@ def collect_features(model, split_df, cfg, device, trim_wake=None):
             x_all = x_all[:, entry.channel_index]
         x_all = apply_normalization(x_all, norm.get("mode", "fixed"),
                                     entry.stats, norm).astype(np.float32)
+        if getattr(entry, "sign", 1.0) != 1.0:   # orientation correction
+            x_all *= np.float32(entry.sign)
         x_all = x_all.reshape(n, S, C).transpose(0, 2, 1)
 
         c_max = cfg.get("c_max", 2)
@@ -727,6 +729,10 @@ def main() -> int:
     ap.add_argument("--min-peers", type=int, default=5,
                     help="da3: fail rather than silently widen the age band")
     ap.add_argument("--out-name", default="")
+    ap.add_argument("--dump-proba", action="store_true",
+                    help="with --prior-correct: save each recording's adapted, "
+                         "prior-corrected per-epoch probabilities to "
+                         "<run>/stage_b/proba_<tag>_prior/<rec_id>.npz")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
 
@@ -1021,6 +1027,14 @@ def main() -> int:
                     yt = ra["y_true"]
                     prior_recs.append({**ra, "proba": pr,
                                        "y_pred": np.where(yt == -1, -1, pr.argmax(1))})
+                if args.dump_proba:
+                    # per-epoch adapted probabilities, for ensembles over folds
+                    pd_dir = os.path.join(run_dir, "stage_b", f"proba_{tag}_prior")
+                    os.makedirs(pd_dir, exist_ok=True)
+                    for ra in prior_recs:
+                        np.savez_compressed(os.path.join(pd_dir, f"{ra['rec_id']}.npz"),
+                                            proba=ra["proba"].astype(np.float32),
+                                            y_true=np.asarray(ra["y_true"], np.int8))
                 jp = _attach_diag(write_metrics(prior_recs,
                                    os.path.join(run_dir, "stage_b",
                                                 f"{tag}_prior"),

@@ -119,11 +119,31 @@ class SequenceEncoder(nn.Module):
         self.drop = nn.Dropout(dropout)
         self.out_dim = 2 * hidden
 
-    def forward(self, x: torch.Tensor):
-        h1, _ = self.gru1(x)
+    def forward(self, x: torch.Tensor, state: Optional[dict] = None,
+                return_state: bool = False):
+        """``state`` carries each layer's FORWARD-direction hidden state from the
+        previous window of the same recording, ``{'g1': (B, H), 'g2': (B, H)}``.
+        The backward direction always starts from zero: it runs from the end of
+        the window, and the future beyond it is not available to carry. With
+        ``return_state`` the final forward states are returned as a third
+        element, for the next window."""
+        if state is None and not return_state:
+            h1, _ = self.gru1(x)
+            h1 = self.drop(h1)
+            h2, _ = self.gru2(h1)
+            return h1, self.drop(h2)
+        B, H = x.shape[0], self.gru1.hidden_size
+
+        def h0(key):
+            fwd = (state or {}).get(key)
+            if fwd is None:
+                fwd = x.new_zeros(B, H)
+            return torch.stack([fwd, torch.zeros_like(fwd)], 0).contiguous()
+
+        h1, n1 = self.gru1(x, h0("g1"))
         h1 = self.drop(h1)
-        h2, _ = self.gru2(h1)
-        return h1, self.drop(h2)
+        h2, n2 = self.gru2(h1, h0("g2"))
+        return h1, self.drop(h2), {"g1": n1[0], "g2": n2[0]}
 
 
 class SequenceHead(nn.Module):

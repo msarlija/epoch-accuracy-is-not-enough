@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import load_config, save_resolved  # noqa: E402
 from data import manifest as mf  # noqa: E402
 from data.dataset import (AugmentConfig, SleepSequenceDataset,  # noqa: E402
+                          StatefulSequenceDataset, make_stateful_loader,
                           entries_from_manifest, make_loader,
                           sequence_length_for_duration, TSO_DIVISOR,
                           wake_trim_bounds)
@@ -115,6 +116,8 @@ def predict_recording(model, arrays, entry, norm_mode: str, norm_cfg: dict,
         x_all = x_all[:, entry.channel_index]
     x_all = apply_normalization(x_all, norm_mode, entry.stats,
                                 norm_cfg).astype(np.float32)
+    if getattr(entry, "sign", 1.0) != 1.0:   # orientation correction, as in the dataset
+        x_all *= np.float32(entry.sign)
     x_all = x_all.reshape(n_epochs, S, C).transpose(0, 2, 1)  # (T, C, S)
 
     preds, alphas, probas = [], [], []
@@ -262,6 +265,7 @@ def build_datasets(cfg, data_dir):
     augment = AugmentConfig(
         channel_dropout_p=aug_cfg.get("channel_dropout_p", 0.4),
         artifact_p=aug_cfg.get("artifact_p", 0.3),
+        sign_flip_p=float(aug_cfg.get("sign_flip_p", 0.0)),
     )
     trim = cfg.get("trim_wake") or {}
     trim_wake = ((float(trim.get("min_minutes", 20.0)),
@@ -280,8 +284,9 @@ def build_datasets(cfg, data_dir):
         seed=cfg.get("seed", 0),
     )
 
-    def dataset(split_df, seq_len, stride, train):
-        return SleepSequenceDataset(
+    def dataset(split_df, seq_len, stride, train, stateful=False):
+        cls = StatefulSequenceDataset if stateful else SleepSequenceDataset
+        return cls(
             entries=entries_from_manifest(split_df), seq_len=seq_len,
             stride=stride, train=train,
             augment=augment if train else None, **common)
@@ -564,10 +569,27 @@ def main() -> int:
                 make_loader(tr_s, bs_short, shuffle=True, num_workers=nw),
                 make_loader(va_s, bs_short, shuffle=False, num_workers=nw))
 
+        if stage_b_cfg.get("stateful"):
+            # Stateful: `bs` parallel streams, each walking its recordings in
+            # consecutive non-overlapping windows with the forward GRU state
+            # carried across them (training/loop.py). The shuffled, overlapping
+            # index above is not used.
+            if short_loaders is not None:
+                return _fail("stage_b.stateful does not support gru_warmup")
+            tr_st = dataset(train_df, seq_len=T, stride=T, train=True, stateful=True)
+            va_st = dataset(val_df, seq_len=T, stride=T, train=False, stateful=True)
+            log.info("Stage B STATEFUL: %d streams, T=%d, consecutive windows "
+                     "(%d train / %d val recordings)", bs, T,
+                     len(tr_st.entries), len(va_st.entries))
+            train_loader = make_stateful_loader(tr_st, bs, train=True,
+                                                num_workers=nw, seed=seed)
+            val_loader = make_stateful_loader(va_st, bs, train=False,
+                                              num_workers=nw, seed=seed)
+        else:
+            train_loader = make_loader(train_ds, bs, shuffle=True, num_workers=nw)
+            val_loader = make_loader(val_ds, bs, shuffle=False, num_workers=nw)
         model_b, hist = run_stage_b(
-            model_cfg,
-            make_loader(train_ds, bs, shuffle=True, num_workers=nw),
-            make_loader(val_ds, bs, shuffle=False, num_workers=nw),
+            model_cfg, train_loader, val_loader,
             stage_b_cfg, run_dir, short_loaders=short_loaders)
         # the phase-1 curve rides along under 'warmup'; lift it out so it gets
         # its own history CSV and learning-curve panel

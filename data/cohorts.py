@@ -105,11 +105,22 @@ COHORTS = {
     ),
     "HPAP": CohortSpec(
         name="HPAP",
-        montage_family="mastoid_proxy",
-        channels=ChannelSpec(names=("M1", "M2"), polarity=(-1, -1)),
+        montage_family="prefrontal",
+        # The NSRR export stores reference minus electrode (Supplementary
+        # Section 1 of the paper). 45 files record FPz against a central
+        # reference: stored M1 - stored FPz = FPz - M1 (N3 skew -0.43, standard).
+        # The other 98 have no FPz channel because FPz IS the reference: stored
+        # M1/M2 = FPz - M1 / FPz - M2. Their stored sign varies from file to file
+        # (per-night N3 skew of M1 and of the reference-free F3-M2 agree in sign
+        # on 80% of nights), so those nights get a per-night sign in the
+        # manifest (scripts/set_orientation.py).
+        channels=ChannelSpec(names=("M1", "M2"), polarity=(1, 1), reference=("FPz", "FPz")),
+        fallbacks=[ChannelSpec(names=("M1", "M2"), polarity=(1, 1))],
         native_epoch_sec=30.0,
         reader="nsrr_xml",
-        notes="HomePAP lab full-PSG arm. Stage 4 mapped into N3.",
+        notes="HomePAP lab full-PSG arm. Stage 4 mapped into N3. FPz-M1/FPz-M2: "
+              "M1/M2 minus FPz where FPz is recorded, else the stored M1/M2 with "
+              "a per-night sign (scripts/set_orientation.py).",
     ),
     "MrOS": CohortSpec(
         name="MrOS",

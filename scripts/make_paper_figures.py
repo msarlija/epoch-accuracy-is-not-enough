@@ -38,6 +38,7 @@ from config import external_cohorts                 # noqa: E402
 from eval.stats import paired_bootstrap             # noqa: E402
 
 RUNS = os.path.expanduser(os.environ.get("SLEEP_DATA_ROOT", "~/data/sleep_staging") + "/runs")
+PREFIX = "final"   # --prefix ens --folds 1 for the ensemble runs
 PAPER = os.path.expanduser(os.environ.get("SLEEP_DATA_ROOT", "~/data/sleep_staging") + "/analysis/paper")
 OUT = os.environ.get("PAPER_FIG_DIR", "figures/paper")   # --wide appends /wide
 
@@ -60,7 +61,7 @@ HEAD_CSV = os.path.expanduser(
 def _recs(arm, split, folds=10, stage="stage_b"):
     fr = []
     for f in range(folds):
-        p = (f"{RUNS}/final_{arm}_seed0_fold{f}of10/{stage}/{split}/"
+        p = (f"{RUNS}/{PREFIX}_{arm}_seed0_fold{f}of10/{stage}/{split}/"
              "per_recording_metrics.csv")
         d = pd.read_csv(p)
         if "external" in split:
@@ -93,29 +94,56 @@ def fig_confusion(args):
     "the cost is structured" -- almost every reallocated epoch lands in N2.
     """
     def conf(arm):
-        c = np.zeros((5, 5), dtype=np.int64)
+        """{rec key: 5x5 counts}, and {rec key: subject} for the bootstrap"""
+        c, subj = {}, {}
         for f in range(args.folds):
-            d = (f"{RUNS}/final_{arm}_seed0_fold{f}of10/stage_b/"
+            d = (f"{RUNS}/{PREFIX}_{arm}_seed0_fold{f}of10/stage_b/"
                  "predictions_external_v2")
             # the directory still holds predictions for cohorts that were
             # later dropped from the external set (STAGES-MSMI); keep only the
             # recordings of config.external_cohorts(), as every table does
-            m = pd.read_csv(f"{RUNS}/final_{arm}_seed0_fold{f}of10/"
+            m = pd.read_csv(f"{RUNS}/{PREFIX}_{arm}_seed0_fold{f}of10/"
                             "stage_b/external_v2/per_recording_metrics.csv")
-            keep = set(m[m.cohort.isin(external_cohorts())].rec_id.astype(str))
+            m = m[m.cohort.isin(external_cohorts())]
+            keep = dict(zip(m.rec_id.astype(str), m.subject_id.astype(str)))
             for fn in sorted(os.listdir(d)):
                 if not fn.endswith(".npz") or fn[:-4] not in keep:
                     continue
                 z = np.load(os.path.join(d, fn))
                 t, p = z["y_true"], z["y_pred"]
-                m = (t >= 0) & (p >= 0)
-                np.add.at(c, (t[m].astype(int), p[m].astype(int)), 1)
-        return c
+                msk = (t >= 0) & (p >= 0)
+                cc = np.zeros((5, 5), dtype=np.int64)
+                np.add.at(cc, (t[msk].astype(int), p[msk].astype(int)), 1)
+                c[f"{fn[:-4]}|f{f}"] = cc
+                subj[f"{fn[:-4]}|f{f}"] = keep[fn[:-4]]
+        return c, subj
 
-    ca, cb = conf("full"), conf(args.arm_b)
-    pa = 100 * ca / ca.sum(1, keepdims=True).clip(min=1)
-    pb = 100 * cb / cb.sum(1, keepdims=True).clip(min=1)
-    d = pa - pb
+    def rownorm(c):
+        return 100 * c / c.sum(1, keepdims=True).clip(min=1)
+
+    CA, subj = conf("full")
+    CB, _ = conf(args.arm_b)
+    keys = sorted(set(CA) & set(CB))
+    ca = sum(CA[k] for k in keys)
+    cb = sum(CB[k] for k in keys)
+    d = rownorm(ca) - rownorm(cb)
+    # subject-clustered bootstrap of every cell of the difference matrix
+    by_subj = {}
+    for k in keys:
+        by_subj.setdefault(subj[k], []).append(k)
+    subjects = sorted(by_subj)
+    SA = np.stack([sum(CA[k] for k in by_subj[sj]) for sj in subjects])
+    SB = np.stack([sum(CB[k] for k in by_subj[sj]) for sj in subjects])
+    rng = np.random.default_rng(0)
+    boots = []
+    for _ in range(2000):
+        idx = rng.integers(0, len(subjects), len(subjects))
+        boots.append(rownorm(SA[idx].sum(0)) - rownorm(SB[idx].sum(0)))
+    boots = np.stack(boots)
+    lo, hi = np.percentile(boots, [2.5, 97.5], axis=0)
+    sig = (lo > 0) | (hi < 0)
+    print("  cells with a 95% interval excluding zero:",
+          [(STAGES[i], STAGES[j], f"{d[i, j]:+.2f}") for i in range(5) for j in range(5) if sig[i, j]])
     recall = np.diag(d)
     off = d.copy()
     np.fill_diagonal(off, np.nan)
@@ -129,11 +157,12 @@ def fig_confusion(args):
     axb.barh(yy, recall, color=cols, height=0.62)
     axb.axvline(0, color=MUTED, lw=0.8)
     for i, v in enumerate(recall):
+        star = "*" if sig[i, i] else ""
         if abs(v) >= 1.3:          # label fits inside the bar
-            axb.text(v / 2, i, f"{v:+.2f}", va="center", ha="center",
+            axb.text(v / 2, i, f"{v:+.2f}{star}", va="center", ha="center",
                      fontsize=max(5.5 * COL_W / 3.5, float(os.environ.get("PAPER_FONT_MIN", 0))), color="white")
         else:
-            axb.text(v + (0.08 if v > 0 else -0.08), i, f"{v:+.2f}",
+            axb.text(v + (0.08 if v > 0 else -0.08), i, f"{v:+.2f}{star}",
                      va="center", ha="left" if v > 0 else "right",
                      fontsize=max(5.5 * COL_W / 3.5, float(os.environ.get("PAPER_FONT_MIN", 0))), color=INK)
     axb.set_yticks(yy); axb.set_yticklabels(STAGES)
@@ -155,7 +184,7 @@ def fig_confusion(args):
                          color=MUTED)
                 continue
             v = off[i, j]
-            axm.text(j, i, f"{v:+.2f}", ha="center", va="center", fontsize=max(5.3 * COL_W / 3.5, float(os.environ.get("PAPER_FONT_MIN", 0))),
+            axm.text(j, i, f"{v:+.2f}" + ("*" if sig[i, j] else ""), ha="center", va="center", fontsize=max(5.3 * COL_W / 3.5, float(os.environ.get("PAPER_FONT_MIN", 0))),
                      color=INK if abs(v) < 0.62 * lim else "white")
     axm.set_xticks(range(5)); axm.set_xticklabels(STAGES)
     axm.set_yticks(range(5)); axm.set_yticklabels(STAGES)
@@ -178,12 +207,12 @@ def fig_kcurve(args):
     """Pooled change in kappa against the number of reference subjects.
 
     Values come from analysis/paper/da_runs/current_kcurve.csv, written by
-    scripts/da_paper_numbers.py on the current config.external_cohorts(), so
-    the figure and the manuscript text are derived from one computation.
+    scripts/ensemble_da_numbers.py (series DA-G, DA-MC, DA-O), so the figure
+    and the manuscript text are derived from one computation.
     """
     src = args.loso_csv or f"{PAPER}/da_runs/current_kcurve.csv"
     if not os.path.exists(src):
-        raise SystemExit(f"missing {src}; run scripts/da_paper_numbers.py first")
+        raise SystemExit(f"missing {src}; run scripts/ensemble_da_numbers.py first")
     df = pd.read_csv(src)
     df["K"] = df["K"].astype(str)
     # the largest finite n_ref is whatever the table carries (15 or 20)
@@ -195,7 +224,8 @@ def fig_kcurve(args):
         g = df[df.series == name].set_index("K").dk
         return np.array([g.get(k, np.nan) for k in ks], dtype=float)
 
-    ys = {k: series(k) for k in ("DA-1", "DA-2", "DA-3", "DA-O")}
+    present = [k for k in ("DA-1", "DA-2", "DA-3", "DA-G", "DA-MC", "DA-O") if (df.series == k).any()]
+    ys = {k: series(k) for k in present}
     # older tables carry a "DA-3 subset" series: DA-3 at 1-2 subjects from the
     # 50-epoch-floor run on the recordings with all three clusters, drawn with
     # open markers. With the missing-cluster fallback DA-3 covers every
@@ -213,8 +243,12 @@ def fig_kcurve(args):
     style = {"DA-1": ("o", SERIES[0], "-", "DA-1 global"),
              "DA-2": ("^", SERIES[1], "-", "DA-2 N2 anchor"),
              "DA-3": ("s", SERIES[2], "-", "DA-3 multi-cluster"),
+             "DA-G": ("o", SERIES[0], "-", "DA-G global"),
+             "DA-MC": ("s", SERIES[2], "-", "DA-MC multi-cluster"),
              "DA-O": ("D", SERIES[3], "--", "DA-O supervised")}
     for k, (mk, col, ls, lab) in style.items():
+        if k not in ys:
+            continue
         # DA-3 at 1-2 subjects comes from a different (50-epoch) run on a
         # subset of recordings: join it to the full-set curve with a dotted line
         x0 = 2 if (k == "DA-3" and has_subset) else 0
@@ -255,8 +289,8 @@ def fig_forest(args):
     governed by a handful of catastrophic ones. Positive is better, which keeps
     the reading direction the same as every other panel.
     """
-    A = _recs("full", args.split)
-    B = _recs(args.arm_b, args.split)
+    A = _recs("full", args.split, args.folds)
+    B = _recs(args.arm_b, args.split, args.folds)
     m = A[["key", "rec_id", "cohort", "subject_id", "rol_ae_min"]].merge(
         B[["key", "rol_ae_min"]], on="key", suffixes=("_a", "_b")).dropna()
     # rec_id repeats once per fold; pair on the fold-qualified key, cluster on
@@ -309,6 +343,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("which", choices=("confusion", "kcurve", "forest", "all"))
     ap.add_argument("--arm-b", default="zero")
+    ap.add_argument("--prefix", default="final", help="run prefix: final (fold models) or ens (ensembles)")
     ap.add_argument("--folds", type=int, default=10)
     ap.add_argument("--within", type=float, default=10.0,
                     help="agreement tolerance in minutes (the paper endpoint)")
@@ -328,7 +363,8 @@ def main() -> int:
                     help="DA-3 delta-kappa at K=1 and K=2 from the 50-epoch "
                          "anchor-floor run, overriding the constants")
     args = ap.parse_args()
-    global COL_W, OUT
+    global COL_W, OUT, PREFIX
+    PREFIX = args.prefix
     if args.wide:
         COL_W = paper_style.use_wide()
         OUT = os.path.join(OUT, "wide")
