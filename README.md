@@ -37,8 +37,8 @@ bash reproduce.sh data       # corpus preparation and signal orientation (Table 
 bash reproduce.sh train      # 3 models x 10 folds, external scoring, ensembles
 bash reproduce.sh time       # time-input results (Tables 1-4, S2, S3, S6-S10)
 bash reproduce.sh adapt      # adaptation runs (DA-G, DA-MC, single anchor, DA-O)
-bash reproduce.sh numbers    # adaptation results (Tables 6, 7, S4, S5, S12, S13)
-bash reproduce.sh gssc       # GSSC comparison (Table 5, S11)
+bash reproduce.sh numbers    # adaptation results (Tables 6, 7, S4, S5, S13, S14)
+bash reproduce.sh gssc       # GSSC comparison (Table 5, S11, S12)
 bash reproduce.sh figures    # Figures 2-4
 ```
 

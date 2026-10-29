@@ -6,8 +6,9 @@ Supplementary Table S11 (scripts/gssc_paper_table.py).
 GSSC receives the prepared signal the models of this study read: every channel
 that passed quality control, at 100 Hz, without EOG, and combines the channels
 with its own consensus rule. Its hypnogram is evaluated with the paper's
-definitions. Recordings already in the output table are skipped, so the run can
-be resumed. WSC is scored too; the table script excludes it because GSSC was
+definitions, and its per-epoch stages are saved to analysis/gssc_hyp/ for the
+confusion matrices (gssc_confusion.py). Recordings already scored are skipped, so
+the run can be resumed. WSC is scored too; the table script excludes it because GSSC was
 trained on it.
 
     uv sync --extra gssc
@@ -32,6 +33,7 @@ from eval.macrostructure import record_macrostructure    # noqa: E402
 
 ROOT = os.path.expanduser(os.environ.get("SLEEP_DATA_ROOT", "~/data/sleep_staging"))
 OUT = f"{ROOT}/analysis/gssc_external_perrec.csv"
+HYP = f"{ROOT}/analysis/gssc_hyp"          # per-epoch GSSC stages, for gssc_confusion.py
 
 
 def good_channels(row):
@@ -70,14 +72,19 @@ def main() -> int:
     man = man[(man.qc_pass == 1) & man.cohort.isin(cohorts)]
     ext = apply_cohort_caps(man, cfg.get("cohort_caps") or {}, seed=cfg.get("seed", 0)).reset_index(drop=True)
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    os.makedirs(HYP, exist_ok=True)
     done = set(pd.read_csv(args.out).rec_id) if os.path.exists(args.out) else set()
     t0 = time.time()
     for i, r in ext.iterrows():
-        if r.rec_id in done:
+        have_hyp = os.path.exists(f"{HYP}/{r.rec_id}.npz")
+        if r.rec_id in done and have_hyp:
             continue
         a = mf.open_arrays(data_dir, r.rec_id, mmap=True)
         y = np.asarray(a["y"], int)
         p = stage(np.asarray(a["x"]), good_channels(r))
+        np.savez_compressed(f"{HYP}/{r.rec_id}.npz", hyp=p.astype(np.int8))
+        if r.rec_id in done:                           # table row exists, only the stages were missing
+            continue
         n = min(len(y), len(p))                        # GSSC leaves the last partial epoch unscored
         yp = np.full(len(y), -1)
         yp[:n] = np.where(y[:n] < 0, -1, p[:n])
