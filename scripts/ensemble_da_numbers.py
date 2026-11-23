@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """Every adaptation number of the paper for the ten-fold ensemble (Tables 6 and 7,
-Supplementary Tables S5, S12 and S13, Figure 4 and the text of Section 3.8). The adapted softmax of each fold model, dumped by
+Supplementary Tables S5, S13 and S14, Figure 4 and the text of Section 3.8). The adapted softmax of each fold model, dumped by
 domain_adapt.py / da4_self_train.py --dump-proba (prior-corrected), is averaged
 over the ten folds into one hypnogram per recording and compared with the
 ensemble of the unadapted fold models. Strategies: DA-G (global), DA-MC
-(multi-cluster), the single-anchor variant DA-A of Supplementary Table S12,
+(multi-cluster), the single-anchor variant DA-A of Supplementary Table S13,
 and the supervised reference DA-O (scripts/da4_self_train.py --dump-proba). A recording a strategy leaves unadapted
 in a fold (too few anchor epochs) enters with its unadapted softmax. Statistics:
 subject-clustered paired bootstrap over 301 subjects, one hypnogram each.
@@ -35,7 +35,7 @@ COH = ['ANPHY', 'DODH', 'DODO', 'DREAMS-P', 'DREAMS-S', 'MASS-SS1', 'WSC']
 KS = ['1', '2', '5', '10', '15', 'all']
 PROT = {'all': 'loso', '1': 'loso1', '2': 'loso2', '5': 'loso5', '10': 'loso10', '15': 'loso15',
         'trans': 'cohort'}
-# DA-G global alignment, DA-A single anchor (N2 only, Supplementary Table S12),
+# DA-G global alignment, DA-A single anchor (N2 only, Supplementary Table S13),
 # DA-MC multi-cluster; the tags are domain_adapt.py's run names
 TAG = {'DA-G': 'da_da1_{p}_all_pre_n2_affine_c0.7_prior',
        'DA-A': 'da_da2_{p}_pred-conf_pre_n2_affine_c0.7_prior',
@@ -143,7 +143,7 @@ def main():
     say('ensemble of unadapted fold models: kappa', round(B0.kappa.mean(), 4), ' within-10', round(B0.w10.mean(), 1),
         ' false early', int(B0.early.sum()), 'of', int(B0.w10.notna().sum()))
 
-    say('\n=== POOLED, leave-one-subject-out (Table 6; DA-A: Supplementary Table S12), ensemble')
+    say('\n=== POOLED, leave-one-subject-out (Table 6; DA-A: Supplementary Table S13), ensemble')
     L = {s: E.table(da_files(s, 'loso'), s + ' loso') for s in ('DA-G', 'DA-A', 'DA-MC')}
     for s, T in L.items():
         pc = per_cohort(T, B0)
@@ -153,10 +153,10 @@ def main():
         say(f"      within-10 pp {fmt(boot(T, B0, 'w10'), 2)}  ROL AE min {fmt(boot(T, B0, 'rol_ae'), 2)}")
         say(f"      false early {int(B0.early.sum())} -> {int(T.early.sum())}  smallest cohort {worst[0]} {worst[1]['d']:+.4f}"
             + (' n.s.' if worst[1]['p'] >= 0.05 else ''))
-    say('\n=== PER COHORT kappa (Table 7; DA-A: Supplementary Table S12), p<0.05 unless n.s.')
+    say('\n=== PER COHORT kappa (Table 7; DA-A: Supplementary Table S13), p<0.05 unless n.s.')
     for s, T in L.items():
         say(s, pc_str(per_cohort(T, B0)))
-    say('\n=== DA-MC minus DA-A (ensembles, same recordings; Supplementary Table S12)')
+    say('\n=== DA-MC minus DA-A (ensembles, same recordings; Supplementary Table S13)')
     say('kappa pooled', fmt(boot(L['DA-MC'], L['DA-A'], 'kappa')))
     say('  per cohort', pc_str(per_cohort(L['DA-MC'], L['DA-A'])))
     say('within-10 pp', fmt(boot(L['DA-MC'], L['DA-A'], 'w10'), 2), ' ROL AE', fmt(boot(L['DA-MC'], L['DA-A'], 'rol_ae'), 2))
@@ -233,7 +233,7 @@ def main():
     say('   half per cohort:', pc_str(pc))
     for K in ('5', '10', '15'):
         say(f"   K={K}: {pct_of(res[K], res["half"])} of the half-cohort value; {ratio(res[K], kc[('DA-MC', K)])} times DA-MC from the same {K} subjects")
-    say('   per cohort by K (Supplementary Table S13):')
+    say('   per cohort by K (Supplementary Table S14):')
     pcK = pd.DataFrame({K: {c: v['d'] for c, v in per_cohort(E.table(dao_files(K), f'DA-O {K}'), HB, 'kappa', 200).items()}
                         for K in ('1', '2', '5', '10', '15', 'half')})
     pcK.loc['Pooled'] = [res[K] for K in pcK.columns]

@@ -63,11 +63,12 @@ if run time; then
   $PY scripts/latency_agreement_report.py --folds 10 --splits test     # Table S8
   $PY scripts/rem_persistence_check.py $ENS --split external_v2        # Table S9
   $PY scripts/confusion_matrix.py $ENS --splits external_v2            # Figure 3 values
+  $PY scripts/architecture_measures.py                                # Table S15, Section 3.2 strata
   $PY scripts/corpus_numbers.py
 fi
 
 # 4. Label-free adaptation (DA-G, DA-MC and the single-anchor variant of
-#    Supplementary Table S12) and the supervised reference (DA-O), on the ten
+#    Supplementary Table S13) and the supervised reference (DA-O), on the ten
 #    time-aware fold models, with the per-epoch probabilities dumped so that
 #    the adapted fold models can be ensembled.
 if run adapt; then
@@ -87,8 +88,8 @@ if run adapt; then
   done
 fi
 
-# 5. Every adaptation number of the paper: the ensembles (Tables 6, 7, S5, S12,
-#    S13, Figure 4 and Section 3.8) and the fold-model values behind the
+# 5. Every adaptation number of the paper: the ensembles (Tables 6, 7, S5, S13,
+#    S14, Figure 4 and Section 3.8) and the fold-model values behind the
 #    class-prior comparison of Supplementary Table S4.
 if run numbers; then
   $PY scripts/paper_da_numbers.py
@@ -96,12 +97,13 @@ if run numbers; then
 fi
 
 # 6. The open-source GSSC stager on the same external recordings (Table 5,
-#    Supplementary Table S11) and its parameter count. Needs `uv sync --extra gssc`.
+#    Supplementary Tables S11 and S12) and its parameter count. Needs `uv sync --extra gssc`.
 if run gssc; then
   $PY scripts/gssc_param_count.py
   $PY scripts/gssc_score.py
   $PY scripts/gssc_paper_table.py --prefix ens --folds 1     # ensembles
   $PY scripts/gssc_paper_table.py                            # fold models (column Single of Table 5)
+  $PY scripts/gssc_confusion.py                              # confusion matrices (Table S12)
 fi
 
 # 7. Figures 2 to 4 (Figure 1 is drawn in the manuscript source).

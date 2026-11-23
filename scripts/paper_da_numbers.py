@@ -8,7 +8,7 @@ model, and the fold-level counterpart of every ensemble number.
 Reads the per-recording outputs of the adaptation runs in ``reproduce.sh``:
 
 * ``analysis/domain_adaptation_da12_perrec.csv``       DA-G and the single
-  anchor DA-A (Supplementary Table S12)
+  anchor DA-A (Supplementary Table S13)
 * ``analysis/domain_adaptation_da3_perrec.csv``        DA-MC (clusters with at
   least 50 epochs, missing clusters dropped from the fit)
 * ``analysis/domain_adaptation_da3_oracle_perrec.csv`` DA-MC with expert labels
@@ -268,7 +268,7 @@ def main():
         dk3 = delta(cond(M3, C3.format(p="loso" + K)), "kappa")["d"]
         print(f"   K={K}: {100 * res[K] / res['half']:.0f}% of the half-cohort value;"
               f" {res[K] / dk3:.1f} times DA-MC from the same {K} subjects")
-    print("   per cohort by K (fold models; Supplementary Table S13 reports the ensembles):")
+    print("   per cohort by K (fold models; Supplementary Table S14 reports the ensembles):")
     pc = H.assign(dk=H.kappa - H.kappa_base).groupby(["cohort", "K"]).dk.mean().unstack("K")[["1", "2", "5", "10", "15", "half"]]
     pc.loc["Pooled"] = [res[k] for k in pc.columns]
     print(pc.round(3).to_string())
