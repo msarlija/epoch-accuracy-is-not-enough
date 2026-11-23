@@ -63,6 +63,7 @@ if run time; then
   $PY scripts/latency_agreement_report.py --folds 10 --splits test     # Table S8
   $PY scripts/rem_persistence_check.py $ENS --split external_v2        # Table S9
   $PY scripts/confusion_matrix.py $ENS --splits external_v2            # Figure 3 values
+  $PY scripts/architecture_measures.py                                # Table S15, Section 3.2 strata
   $PY scripts/corpus_numbers.py
 fi
 

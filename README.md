@@ -35,7 +35,7 @@ lists where each comes from and which columns the readers expect.
 bash reproduce.sh            # everything
 bash reproduce.sh data       # corpus preparation and signal orientation (Table S1)
 bash reproduce.sh train      # 3 models x 10 folds, external scoring, ensembles
-bash reproduce.sh time       # time-input results (Tables 1-4, S2, S3, S6-S10)
+bash reproduce.sh time       # time-input results (Tables 1-4, S2, S3, S6-S10, S15)
 bash reproduce.sh adapt      # adaptation runs (DA-G, DA-MC, single anchor, DA-O)
 bash reproduce.sh numbers    # adaptation results (Tables 6, 7, S4, S5, S13, S14)
 bash reproduce.sh gssc       # GSSC comparison (Table 5, S11, S12)
